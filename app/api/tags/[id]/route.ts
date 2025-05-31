@@ -3,9 +3,9 @@ import { NextRequest, NextResponse } from "next/server"
 
 export async function PUT(
 	request: NextRequest,
-	{ params }: { params: { id: string } }
+	{ params }: { params: Promise<{ id: string }> }
 ) {
-	const { id } = params
+	const { id } = await params
 	const supabase = await createClient()
 	const { name } = await request.json()
 
@@ -32,9 +32,9 @@ export async function PUT(
 
 export async function DELETE(
 	request: NextRequest,
-	{ params }: { params: { id: string } }
+	{ params }: { params: Promise<{ id: string }> }
 ) {
-	const { id } = params
+	const { id } = await params
 	const supabase = await createClient()
 
 	// Check if there are any bookmarks using this tag
