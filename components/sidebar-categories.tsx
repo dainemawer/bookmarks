@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { ChevronDown, Plus, FolderTree, Folder } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { CategoryDialog } from "./category-dialog"
@@ -23,35 +23,41 @@ export function SidebarCategories({ categories: initialCategories }: SidebarCate
 	const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
 	const pathname = usePathname()
 
-	const handleCategorySuccess = (category: Category) => {
-		// Ensure the new category has a bookmark_count of 0
-		const newCategory = { ...category, bookmark_count: 0 }
-		// Add the new category and sort alphabetically
-		const updatedCategories = [...categories, newCategory].sort((a, b) =>
-			a.name.localeCompare(b.name)
-		)
-		setCategories(updatedCategories)
+	// Memoize category handlers
+	const handleCategorySuccess = useCallback((category: Category) => {
+		setCategories(prev => {
+			const newCategory = { ...category, bookmark_count: 0 }
+			return [...prev, newCategory].sort((a, b) => a.name.localeCompare(b.name))
+		})
 		setIsAddDialogOpen(false)
-		// Automatically expand the categories section when a new category is added
 		setIsOpen(true)
-	}
+	}, [])
+
+	const handleToggleOpen = useCallback(() => {
+		setIsOpen(prev => !prev)
+	}, [])
+
+	const handleAddCategory = useCallback(() => {
+		setIsAddDialogOpen(true)
+	}, [])
+
+	// Memoize category count update handler
+	const handleCategoryCountUpdate = useCallback((e: CustomEvent) => {
+		const { categoryId, increment } = e.detail
+		setCategories(prev =>
+			prev.map(category =>
+				category.id === categoryId
+					? {
+							...category,
+							bookmark_count: category.bookmark_count + (increment ? 1 : -1),
+					  }
+					: category
+			)
+		)
+	}, [])
 
 	// Listen for category count updates
 	useEffect(() => {
-		const handleCategoryCountUpdate = (e: CustomEvent) => {
-			const { categoryId, increment } = e.detail
-			setCategories(prev =>
-				prev.map(category =>
-					category.id === categoryId
-						? {
-								...category,
-								bookmark_count: category.bookmark_count + (increment ? 1 : -1),
-						  }
-						: category
-				)
-			)
-		}
-
 		window.addEventListener(
 			"updateCategoryCount",
 			handleCategoryCountUpdate as EventListener
@@ -63,7 +69,31 @@ export function SidebarCategories({ categories: initialCategories }: SidebarCate
 				handleCategoryCountUpdate as EventListener
 			)
 		}
-	}, [])
+	}, [handleCategoryCountUpdate])
+
+	// Memoize category list
+	const categoryList = useMemo(() => (
+		<div className="ml-4 space-y-1">
+			{categories.map((category) => (
+				<Link
+					key={category.id}
+					href={`/categories/${category.id}`}
+					className={cn(
+						"flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground",
+						pathname === `/categories/${category.id}`
+							? "bg-accent text-accent-foreground"
+							: "text-muted-foreground"
+					)}
+				>
+					<Folder className="h-4 w-4 shrink-0" />
+					<span className="truncate">{category.name}</span>
+					<span className="ml-auto text-xs text-muted-foreground">
+						{category.bookmark_count}
+					</span>
+				</Link>
+			))}
+		</div>
+	), [categories, pathname])
 
 	return (
 		<div className="space-y-1">
@@ -71,7 +101,7 @@ export function SidebarCategories({ categories: initialCategories }: SidebarCate
 				<Button
 					variant="ghost"
 					className="flex-1 justify-between px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-					onClick={() => setIsOpen(!isOpen)}
+					onClick={handleToggleOpen}
 				>
 					<div className="flex items-center gap-3">
 						<FolderTree className="h-4 w-4" />
@@ -88,34 +118,13 @@ export function SidebarCategories({ categories: initialCategories }: SidebarCate
 					variant="ghost"
 					size="icon"
 					className="h-8 w-8 shrink-0"
-					onClick={() => setIsAddDialogOpen(true)}
+					onClick={handleAddCategory}
 				>
 					<Plus className="h-4 w-4" />
 					<span className="sr-only">Add category</span>
 				</Button>
 			</div>
-			{isOpen && (
-				<div className="ml-4 space-y-1">
-					{categories.map((category) => (
-						<Link
-							key={category.id}
-							href={`/categories/${category.id}`}
-							className={cn(
-								"flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground",
-								pathname === `/categories/${category.id}`
-									? "bg-accent text-accent-foreground"
-									: "text-muted-foreground"
-							)}
-						>
-							<Folder className="h-4 w-4 shrink-0" />
-							<span className="truncate">{category.name}</span>
-							<span className="ml-auto text-xs text-muted-foreground">
-								{category.bookmark_count}
-							</span>
-						</Link>
-					))}
-				</div>
-			)}
+			{isOpen && categoryList}
 			<CategoryDialog
 				open={isAddDialogOpen}
 				onOpenChange={setIsAddDialogOpen}

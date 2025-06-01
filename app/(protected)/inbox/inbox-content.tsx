@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
 import { BookmarkCard } from "@/components/bookmark-card"
@@ -23,68 +23,63 @@ export function InboxContent({ initialBookmarks }: InboxContentProps) {
 	const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
 	const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null)
 
-	const handleEdit = (bookmark: Bookmark) => {
+	// Memoize the initial bookmarks map for O(1) lookups
+	const initialBookmarksMap = useMemo(() => {
+		return new Map(initialBookmarks.map(bookmark => [bookmark.id, bookmark]))
+	}, [initialBookmarks])
+
+	// Memoize event handlers
+	const handleCategoryUpdate = useCallback((bookmark: Bookmark, isNew: boolean) => {
+		if (bookmark.category_id) {
+			window.dispatchEvent(new CustomEvent('updateCategoryCount', {
+				detail: {
+					categoryId: bookmark.category_id,
+					increment: isNew
+				}
+			}))
+		}
+	}, [])
+
+	const handleBookmarkChange = useCallback((bookmark: Bookmark, oldBookmark?: Bookmark) => {
+		if (oldBookmark?.category_id !== bookmark.category_id) {
+			if (oldBookmark?.category_id) {
+				handleCategoryUpdate(oldBookmark, false)
+			}
+			handleCategoryUpdate(bookmark, true)
+		}
+	}, [handleCategoryUpdate])
+
+	// Memoize bookmark handlers
+	const handleEdit = useCallback((bookmark: Bookmark) => {
 		setEditingBookmark(bookmark)
-	}
+	}, [])
 
-	const handleCloseEdit = () => {
+	const handleCloseEdit = useCallback(() => {
 		setEditingBookmark(null)
-	}
+	}, [])
 
-	const handleBookmarkAdd = (newBookmark: Bookmark) => {
+	const handleBookmarkAdd = useCallback((newBookmark: Bookmark) => {
 		setBookmarks(prev => [newBookmark, ...prev])
-	}
+	}, [])
 
-	const handleBookmarkDelete = (deletedBookmarkId: string) => {
+	const handleBookmarkDelete = useCallback((deletedBookmarkId: string) => {
 		setBookmarks(prev => prev.filter(bookmark => bookmark.id !== deletedBookmarkId))
-	}
+	}, [])
 
-	const handleBookmarkUpdate = (updatedBookmark: Bookmark) => {
+	const handleBookmarkUpdate = useCallback((updatedBookmark: Bookmark) => {
 		setBookmarks(prev =>
 			prev.map(bookmark =>
 				bookmark.id === updatedBookmark.id ? updatedBookmark : bookmark
 			)
 		)
-	}
+	}, [])
 
 	// Handle category count updates
 	useEffect(() => {
-		const handleCategoryUpdate = (bookmark: Bookmark, isNew: boolean) => {
-			if (bookmark.category_id) {
-				const event = new CustomEvent('updateCategoryCount', {
-					detail: {
-						categoryId: bookmark.category_id,
-						increment: isNew
-					}
-				})
-				window.dispatchEvent(event)
-			}
-		}
-
-		// Listen for bookmark changes
-		const handleBookmarkChange = (bookmark: Bookmark, oldBookmark?: Bookmark) => {
-			if (oldBookmark?.category_id !== bookmark.category_id) {
-				// If category changed, decrement old category
-				if (oldBookmark?.category_id) {
-					const event = new CustomEvent('updateCategoryCount', {
-						detail: {
-							categoryId: oldBookmark.category_id,
-							increment: false
-						}
-					})
-					window.dispatchEvent(event)
-				}
-				// Increment new category
-				handleCategoryUpdate(bookmark, true)
-			}
-		}
-
-		// Set up event listeners for bookmark changes
 		const handleAdd = (bookmark: Bookmark) => handleCategoryUpdate(bookmark, true)
 		const handleDelete = (bookmark: Bookmark) => handleCategoryUpdate(bookmark, false)
 		const handleUpdate = (bookmark: Bookmark, oldBookmark: Bookmark) => handleBookmarkChange(bookmark, oldBookmark)
 
-		// Add event listeners
 		window.addEventListener('bookmarkAdded', ((e: CustomEvent) => handleAdd(e.detail)) as EventListener)
 		window.addEventListener('bookmarkDeleted', ((e: CustomEvent) => handleDelete(e.detail)) as EventListener)
 		window.addEventListener('bookmarkUpdated', ((e: CustomEvent) => handleUpdate(e.detail.bookmark, e.detail.oldBookmark)) as EventListener)
@@ -94,30 +89,46 @@ export function InboxContent({ initialBookmarks }: InboxContentProps) {
 			window.removeEventListener('bookmarkDeleted', ((e: CustomEvent) => handleDelete(e.detail)) as EventListener)
 			window.removeEventListener('bookmarkUpdated', ((e: CustomEvent) => handleUpdate(e.detail.bookmark, e.detail.oldBookmark)) as EventListener)
 		}
-	}, [])
+	}, [handleCategoryUpdate, handleBookmarkChange])
 
 	// Dispatch events when bookmarks change
 	useEffect(() => {
+		const currentBookmarksMap = new Map(bookmarks.map(bookmark => [bookmark.id, bookmark]))
+
+		// Handle new and updated bookmarks
 		bookmarks.forEach(bookmark => {
-			const oldBookmark = initialBookmarks.find(b => b.id === bookmark.id)
+			const oldBookmark = initialBookmarksMap.get(bookmark.id)
 			if (!oldBookmark) {
-				// New bookmark
 				window.dispatchEvent(new CustomEvent('bookmarkAdded', { detail: bookmark }))
 			} else if (oldBookmark.category_id !== bookmark.category_id) {
-				// Updated bookmark with category change
 				window.dispatchEvent(new CustomEvent('bookmarkUpdated', {
 					detail: { bookmark, oldBookmark }
 				}))
 			}
 		})
 
-		// Check for deleted bookmarks
+		// Handle deleted bookmarks
 		initialBookmarks.forEach(oldBookmark => {
-			if (!bookmarks.find(b => b.id === oldBookmark.id)) {
+			if (!currentBookmarksMap.has(oldBookmark.id)) {
 				window.dispatchEvent(new CustomEvent('bookmarkDeleted', { detail: oldBookmark }))
 			}
 		})
-	}, [bookmarks, initialBookmarks])
+	}, [bookmarks, initialBookmarksMap])
+
+	// Memoize the empty state JSX
+	const emptyState = useMemo(() => (
+		<div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center">
+			<Plus className="mb-4 h-12 w-12 text-muted-foreground" />
+			<h3 className="mb-2 text-lg font-medium">No bookmarks in inbox</h3>
+			<p className="mb-4 text-sm text-muted-foreground">
+				Add a new bookmark or check back later
+			</p>
+			<Button onClick={() => setIsAddDialogOpen(true)}>
+				<Plus className="mr-2 h-4 w-4" />
+				Add Bookmark
+			</Button>
+		</div>
+	), [])
 
 	return (
 		<div className="space-y-6">
@@ -134,19 +145,7 @@ export function InboxContent({ initialBookmarks }: InboxContentProps) {
 				</Button>
 			</div>
 
-			{bookmarks.length === 0 ? (
-				<div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center">
-					<Plus className="mb-4 h-12 w-12 text-muted-foreground" />
-					<h3 className="mb-2 text-lg font-medium">No bookmarks in inbox</h3>
-					<p className="mb-4 text-sm text-muted-foreground">
-						Add a new bookmark or check back later
-					</p>
-					<Button onClick={() => setIsAddDialogOpen(true)}>
-						<Plus className="mr-2 h-4 w-4" />
-						Add Bookmark
-					</Button>
-				</div>
-			) : (
+			{bookmarks.length === 0 ? emptyState : (
 				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
 					{bookmarks.map((bookmark) => (
 						<BookmarkCard
