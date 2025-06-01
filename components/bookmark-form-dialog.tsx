@@ -1,7 +1,6 @@
 "use client"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,8 +10,15 @@ import { createClient } from "@/lib/supabase/client"
 import { fetchAndStoreBookmarkMetadata } from "@/app/actions/bookmark-metadata"
 import { PostgrestError } from "@supabase/supabase-js"
 import { Database } from "@/database.types"
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select"
 
-type Bookmark = Database["public"]["Tables"]["bookmarks"]["Row"]
+type Category = Database["public"]["Tables"]["categories"]["Row"]
 
 interface BookmarkFormDialogProps {
 	open: boolean
@@ -22,8 +28,20 @@ interface BookmarkFormDialogProps {
 		title: string
 		url: string
 		description?: string | null
+		category_id?: string | null
 	}
-	onSuccess?: (bookmark: Bookmark) => void
+	onSuccess?: (bookmark: Database["public"]["Tables"]["bookmarks"]["Row"] & {
+		categories: {
+			id: string
+			name: string
+		} | null
+		bookmark_tags: {
+			tags: {
+				id: string
+				name: string
+			}
+		}[]
+	}) => void
 }
 
 export function BookmarkFormDialog({
@@ -32,14 +50,62 @@ export function BookmarkFormDialog({
 	bookmark,
 	onSuccess,
 }: BookmarkFormDialogProps) {
-	const router = useRouter()
 	const [isLoading, setIsLoading] = useState(false)
 	const [error, setError] = useState<string | null>(null)
+	const [categories, setCategories] = useState<Category[]>([])
 	const [formData, setFormData] = useState({
-		title: bookmark?.title || "",
-		url: bookmark?.url || "",
-		description: bookmark?.description || "",
+		title: "",
+		url: "",
+		description: "",
+		category_id: "",
 	})
+
+	// Reset form data when dialog opens/closes
+	useEffect(() => {
+		if (open) {
+			if (bookmark) {
+				// If editing, populate form with bookmark data
+				setFormData({
+					title: bookmark.title || "",
+					url: bookmark.url || "",
+					description: bookmark.description || "",
+					category_id: bookmark.category_id || "",
+				})
+			} else {
+				// If adding new, reset form
+				setFormData({
+					title: "",
+					url: "",
+					description: "",
+					category_id: "",
+				})
+			}
+		}
+	}, [open, bookmark])
+
+	// Fetch categories when the dialog opens
+	useEffect(() => {
+		const fetchCategories = async () => {
+			const supabase = createClient()
+			const { data: { user } } = await supabase.auth.getUser()
+
+			if (user) {
+				const { data } = await supabase
+					.from("categories")
+					.select("*")
+					.eq("user_id", user.id)
+					.order("name")
+
+				if (data) {
+					setCategories(data)
+				}
+			}
+		}
+
+		if (open) {
+			fetchCategories()
+		}
+	}, [open])
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault()
@@ -64,10 +130,23 @@ export function BookmarkFormDialog({
 						title: formData.title,
 						url: formData.url,
 						description: formData.description,
+						category_id: formData.category_id || null,
 					})
 					.eq("id", bookmark.id)
 					.eq("user_id", user.id) // Ensure user owns the bookmark
-					.select()
+					.select(`
+						*,
+						categories (
+							id,
+							name
+						),
+						bookmark_tags (
+							tags (
+								id,
+								name
+							)
+						)
+					`)
 					.single()
 
 				if (updateError) throw updateError
@@ -87,9 +166,22 @@ export function BookmarkFormDialog({
 						title: formData.title,
 						url: formData.url,
 						description: formData.description,
-						user_id: user.id, // Add the user_id
+						category_id: formData.category_id || null,
+						user_id: user.id,
 					})
-					.select()
+					.select(`
+						*,
+						categories (
+							id,
+							name
+						),
+						bookmark_tags (
+							tags (
+								id,
+								name
+							)
+						)
+					`)
 					.single()
 
 				if (insertError) throw insertError
@@ -105,7 +197,6 @@ export function BookmarkFormDialog({
 				}
 			}
 
-			router.refresh()
 			onOpenChange(false)
 		} catch (err) {
 			console.error("Error saving bookmark:", err)
@@ -168,6 +259,30 @@ export function BookmarkFormDialog({
 							placeholder="Add a description..."
 							rows={3}
 						/>
+					</div>
+					<div className="space-y-2">
+						<Label htmlFor="category">Category</Label>
+						<Select
+							value={formData.category_id}
+							onValueChange={(value) =>
+								setFormData((prev) => ({
+									...prev,
+									category_id: value,
+								}))
+							}
+						>
+							<SelectTrigger>
+								<SelectValue placeholder="Select a category" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="null">None</SelectItem>
+								{categories.map((category) => (
+									<SelectItem key={category.id} value={category.id}>
+										{category.name}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
 					</div>
 					<div className="flex justify-end gap-2">
 						<Button

@@ -19,6 +19,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Grid, List } from "lucide-react"
+import { BookmarkFormDialog } from "@/components/bookmark-form-dialog"
 
 interface Tag {
 	id: string
@@ -53,6 +54,8 @@ export function BookmarksList() {
 	const [searchQuery, setSearchQuery] = useState("")
 	const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
 	const [isLoading, setIsLoading] = useState(true)
+	const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+	const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null)
 
 	useEffect(() => {
 		async function fetchBookmarks() {
@@ -85,6 +88,82 @@ export function BookmarksList() {
 
 		fetchBookmarks()
 	}, [])
+
+	const handleBookmarkDelete = (deletedBookmarkId: string) => {
+		setBookmarks(prev => {
+			const deletedBookmark = prev.find(bookmark => bookmark.id === deletedBookmarkId)
+			if (deletedBookmark?.category_id) {
+				// Dispatch event to update category count
+				const event = new CustomEvent('updateCategoryCount', {
+					detail: {
+						categoryId: deletedBookmark.category_id,
+						increment: false
+					}
+				})
+				window.dispatchEvent(event)
+			}
+			return prev.filter(bookmark => bookmark.id !== deletedBookmarkId)
+		})
+	}
+
+	const handleBookmarkSuccess = (bookmark: Bookmark) => {
+		// Update the bookmarks list
+		setBookmarks((prev) => {
+			// If the bookmark already exists, update it
+			if (prev.some((b) => b.id === bookmark.id)) {
+				const oldBookmark = prev.find(b => b.id === bookmark.id)
+				// If the category changed, update both old and new category counts
+				if (oldBookmark?.category_id !== bookmark.category_id) {
+					if (oldBookmark?.category_id) {
+						const event = new CustomEvent('updateCategoryCount', {
+							detail: {
+								categoryId: oldBookmark.category_id,
+								increment: false
+							}
+						})
+						window.dispatchEvent(event)
+					}
+					if (bookmark.category_id) {
+						const event = new CustomEvent('updateCategoryCount', {
+							detail: {
+								categoryId: bookmark.category_id,
+								increment: true
+							}
+						})
+						window.dispatchEvent(event)
+					}
+				}
+				return prev.map((b) => (b.id === bookmark.id ? bookmark : b))
+			}
+			// Otherwise, add it to the list and update category count
+			if (bookmark.category_id) {
+				const event = new CustomEvent('updateCategoryCount', {
+					detail: {
+						categoryId: bookmark.category_id,
+						increment: true
+					}
+				})
+				window.dispatchEvent(event)
+			}
+			return [bookmark, ...prev]
+		})
+	}
+
+	const handleEdit = (bookmark: Bookmark) => {
+		setEditingBookmark(bookmark)
+	}
+
+	const handleCloseEdit = () => {
+		setEditingBookmark(null)
+	}
+
+	const handleBookmarkUpdate = (updatedBookmark: Bookmark) => {
+		setBookmarks(prev =>
+			prev.map(bookmark =>
+				bookmark.id === updatedBookmark.id ? updatedBookmark : bookmark
+			)
+		)
+	}
 
 	// Filter bookmarks based on search query
 	const filteredBookmarks = bookmarks.filter((bookmark) =>
@@ -183,6 +262,7 @@ export function BookmarksList() {
 				>
 					{sortedBookmarks.map((bookmark) => (
 						<BookmarkCard
+							id={bookmark.id}
 							key={bookmark.id}
 							title={bookmark.title || ""}
 							url={bookmark.url}
@@ -191,9 +271,33 @@ export function BookmarksList() {
 							createdAt={new Date(bookmark.created_at || "")}
 							faviconUrl={bookmark.favicon_url || undefined}
 							ogImageUrl={bookmark.og_image_url || undefined}
+							category={bookmark.categories}
+							onEdit={() => handleEdit(bookmark)}
+							onDelete={() => handleBookmarkDelete(bookmark.id)}
 						/>
 					))}
 				</div>
+			)}
+
+			<BookmarkFormDialog
+				open={isAddDialogOpen}
+				onOpenChange={setIsAddDialogOpen}
+				onSuccess={handleBookmarkSuccess}
+			/>
+
+			{editingBookmark && (
+				<BookmarkFormDialog
+					open={!!editingBookmark}
+					onOpenChange={handleCloseEdit}
+					bookmark={{
+						id: editingBookmark.id,
+						title: editingBookmark.title || "",
+						url: editingBookmark.url,
+						description: editingBookmark.description,
+						category_id: editingBookmark.category_id
+					}}
+					onSuccess={handleBookmarkUpdate}
+				/>
 			)}
 		</div>
 	)
